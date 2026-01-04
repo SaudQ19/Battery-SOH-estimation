@@ -1,0 +1,7 @@
+torch>=2.0.0
+numpy<2.0,>=1.23.5
+matplotlib>=3.7.0
+pybamm>=25.6.0
+scipy>=1.10.0
+jupyter>=1.0.0
+ipykernel>=6.20.0
