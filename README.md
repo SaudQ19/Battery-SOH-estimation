@@ -98,7 +98,7 @@ def soc_to_voltage(soc):
 **Results:**
 - Polynomial fit closely matches PyBaMM OCV data
 - Example: SOC = 0.5 → Voltage ≈ 3.524V
-- Fast computation: ~1000x faster than full physics simulation
+- Fast computation: Significantly faster than full physics simulation
 
 **Applications:**
 - **Battery Management Systems (BMS):** Real-time SOC estimation
