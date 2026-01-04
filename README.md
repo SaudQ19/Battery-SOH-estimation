@@ -14,7 +14,7 @@
 
 **Results:**
 - Successfully learned the exponential function without labeled data
-- Mean Absolute Error: ~0.000001 (excellent fit)
+- Mean Absolute Error: ~0.0004 
 - Demonstrates PINN's ability to learn from governing equations alone
 
 **Key Insight:** PINNs can solve differential equations by encoding physical laws directly into the loss function, eliminating the need for extensive labeled datasets.
@@ -38,9 +38,9 @@
 **Results:**
 | Model | Mean Absolute Error |
 |-------|---------------------|
-| PINN (tanh) | ~0.02 |
-| PINN (sigmoid) | ~0.15 |
-| Regular NN | ~0.80 |
+| PINN (tanh) | ~0.32 |
+| PINN (sigmoid) | ~0.45 |
+| Regular NN | ~0.62 |
 
 **Discussion:**
 - **PINN (tanh)** accurately extrapolated the sine wave beyond training data by leveraging the physics of simple harmonic motion
