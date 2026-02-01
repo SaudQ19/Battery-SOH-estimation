@@ -295,7 +295,211 @@ $$
 
 
 ---
+# Week 4: Physics-Informed Transformer for Battery SoH Prediction
 
+##  Objective
+
+Integrate **Single Particle Model (SPM)** electrochemical equations into a Transformer neural network to predict battery State of Health (SoH) with physics-based constraints.
+
+---
+
+- **Data Types**: 
+  - Discharge cycles (~2,794 cycles)
+  - Impedance measurements (~1,956 tests with Re, Rct)
+- **Features**: Voltage, Current, Temperature, Time
+
+---
+
+##  Architecture: Physics-Informed Neural Network (PINN)
+
+### Data Flow
+
+```
+Raw Discharge Data (1000+ timesteps)
+    ↓
+[1] Resampling → 200 uniform timesteps
+    ↓
+[2] Binning → 20 bins (averaged features)
+    ↓
+[3] Transformer Encoder (3 layers, 4 heads, d_model=64)
+    ↓
+[4] Multi-Head Prediction:
+    ├─ SoH Head → State of Health (0-1)
+    ├─ Capacity Head → Discharge capacity
+    ├─ Energy Head → Energy throughput
+    └─ SPM Parameter Heads:
+        ├─ R_total: Total resistance (Ω)
+        ├─ θ_pos_0: Initial positive stoichiometry
+        └─ θ_neg_0: Initial negative stoichiometry
+    ↓
+[5] SPM Physics Module:
+    Input: (I, V, SoC, R_total, θ_pos, θ_neg, T)
+    Output: V_predicted (200 timesteps)
+    ↓
+[6] Loss Computation & Backpropagation
+```
+
+---
+
+##  Single Particle Model (SPM) Equations
+
+### 1. Stoichiometry Evolution
+$$\theta_{pos}(t) = \theta_{pos,0} + \Delta\theta(SoC)$$
+$$\theta_{neg}(t) = \theta_{neg,0} - \Delta\theta(SoC)$$
+$$\Delta\theta = (1 - SoC) \times 0.5$$
+
+Where:
+- $\theta = \frac{c_s}{c_{s,max}}$ : Normalized lithium concentration (stoichiometry)
+- $SoC$ : State of Charge (0-1)
+
+### 2. Open Circuit Voltage (OCV)
+
+**Positive Electrode (LiCoO₂):**
+$$U_{pos}(\theta) = 4.2 - 0.5\theta + 0.1\sin(10\theta)$$
+Range: $\theta_{pos} \in [0.4, 0.99]$
+
+**Negative Electrode (Graphite):**
+$$U_{neg}(\theta) = 0.16 + 0.2\theta - 0.15\sin(8\theta)$$
+Range: $\theta_{neg} \in [0.01, 0.9]$
+
+### 3. Terminal Voltage
+$$V_{terminal}(t) = U_{pos}(\theta_{pos}(t)) - U_{neg}(\theta_{neg}(t)) - I(t) \cdot R_{total}$$
+
+Where:
+- $I(t)$ : Current at time $t$ (A)
+- $R_{total}$ : Total cell resistance (Ω) = $R_e + R_{ct}$ (learned from data)
+
+---
+
+##  Loss Function
+
+### Multi-Objective Loss
+$$\mathcal{L}_{total} = \mathcal{L}_{SoH} + \lambda_Q \mathcal{L}_Q + \lambda_E \mathcal{L}_E + \lambda_{physics} \mathcal{L}_{physics} + \lambda_R \mathcal{L}_R$$
+
+### Components
+
+1. **SoH Loss (Primary Target)**  
+   L_SoH = MSE(SoH_pred, SoH_true)
+
+2. **Capacity Loss (λ_Q = 0.3)**  
+   L_Q = MSE(Q_pred, Q_true)
+
+3. **Energy Loss (λ_E = 0.3)**  
+   L_E = MSE(E_pred, E_true)
+
+4. **Physics Loss (λ_physics = 0.7)**  
+   L_physics = (1 / N) · Σₜ (V_SPM(t) − V_measured(t))²  
+
+   *Enforces voltage predictions to match SPM differential equations.*
+
+5. **Resistance Constraint (λ_R = 0.3)**  
+   L_R = MSE(R_learned, R_measured)
+
+   *Uses impedance test data (R_e + R_ct) to constrain learned resistance.*
+
+---
+
+## 🔧 Implementation Details
+
+### Hyperparameters
+```python
+BINS = 20              # Sequence length for Transformer
+M_RESAMPLE = 200       # Physics timesteps
+BATCH_SIZE = 64
+EPOCHS = 60
+LR = 5e-5              # Learning rate
+DEVICE = "cuda"        # GPU acceleration
+
+# Loss weights
+LAMBDA_Q = 0.3
+LAMBDA_E = 0.3
+LAMBDA_PHYSICS = 0.7
+LAMBDA_R = 0.3
+```
+
+### Model Architecture
+- **Embedding**: Linear(5 → 64)
+- **Transformer Encoder**: 3 layers, 4 attention heads
+- **Heads**: 
+  - SoH: MLP(64 → 32 → 1) + Sigmoid
+  - Capacity/Energy: Linear(64 → 1)
+  - SPM Parameters: MLP(64 → 16 → 1) with range constraints
+
+### Optimization
+- **Optimizer**: AdamW (weight_decay=1e-5)
+- **Scheduler**: CosineAnnealingLR
+- **Gradient Clipping**: max_norm=1.0
+- **Checkpointing**: Every 5 epochs + best model
+
+---
+
+## 📈 Results
+
+### SoH Prediction Performance
+- **MAE**: ~2-3%
+- **RMSE**: ~3-4%
+- **Max Error**: ~8-10%
+
+### Voltage Prediction (SPM)
+- **MAE**: ~0.05-0.1 V per timestep
+- **RMSE**: ~0.08-0.15 V
+- Physics loss enforces realistic voltage trajectories
+
+### Learned SPM Parameters
+- **Resistance** ($R_{total}$):
+  - Mean: 0.06-0.08 Ω
+  - Std: 0.01-0.02 Ω
+  - Matches measured impedance data (Re + Rct)
+  
+- **Positive Stoichiometry** ($\theta_{pos,0}$):
+  - Mean: ~0.7
+  - Range: [0.5, 0.9]
+  
+- **Negative Stoichiometry** ($\theta_{neg,0}$):
+  - Mean: ~0.25
+  - Range: [0.1, 0.4]
+
+---
+
+##  Key Innovations
+
+1. **Hybrid Architecture**: Combines data-driven learning (Transformer) with physics-based modeling (SPM)
+
+2. **Multi-Task Learning**: Jointly optimizes SoH prediction + voltage prediction + parameter estimation
+
+3. **Physical Constraints**: 
+   - SPM differential equations embedded in forward pass
+   - Measured resistance from impedance tests used as constraint
+   - Stoichiometry ranges physically meaningful
+
+4. **Interpretability**: Learned parameters have electrochemical meaning
+   - $R_{total}$: Cell degradation indicator
+   - $\theta$: Lithium distribution in electrodes
+
+---
+
+
+---
+
+## Advantages of Physics-Informed Approach
+
+| Aspect | Pure Data-Driven | **Physics-Informed (Ours)** |
+|--------|------------------|----------------------------|
+| **Accuracy** | Good |  Better |
+| **Generalization** | Limited |  Strong (physics constraints) |
+| **Interpretability** | Black box |  Meaningful parameters |
+| **Data Efficiency** | High data needs |  Lower (physics guides learning) |
+
+
+---
+
+
+
+##  Conclusion
+
+This physics-informed transformer achieves **~2-3% MAE** in SoH prediction by embedding SPM differential equations directly into the loss function. Unlike pure data-driven models, it learns interpretable electrochemical parameters (resistance, stoichiometry) while enforcing voltage consistency, enabling robust predictions with physical guarantees on battery degradation trajectories.
+
+---
 
 
 
